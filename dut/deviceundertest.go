@@ -25,44 +25,43 @@
 //
 // Description:
 //
-// Implements communication with the device-under-test via a zeromq-based
-// connection. By using this module, the network tester can trigger certain
-// events that cause actions to be executed by a software running on the
-// Device-under-Test. This allows the network tester to trigger a configuration
-// update on the DuT and thus to evalute the impacts of the DuT configuration on
-// the measured performance.
+// Implements the exchange of JSON messages with the Fluent10G agent runnning
+// on the device-under-test (DuT) via a ZeroMQ-based communication channel. By
+// using this module, the measurement application can trigger events that cause
+// actions (e.g. reconfiguration) to be executed on the DuT. In return, it can
+// collect monitoring information recorded by software running on the DuT.
 
-package gofluent10g
+package dut
 
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/aoeldemann/gofluent10g"
 	zmq "github.com/pebbe/zmq4"
-	"net"
 )
 
 // DeviceUnderTest is a struct providing methods for interaction with the
 // Device-under-Test.
 type DeviceUnderTest struct {
-	Name string      // name of the DuT
-	ip   net.IP      // IP address on which the DuT agent is listening
-	port uint16      // Port number on which the DuT agent is listening
-	sock *zmq.Socket // ZMQ socket
+	Name     string      // name of the DuT
+	hostname string      // hostname of the DuT
+	port     uint16      // port number on which the DuT agent is listening
+	sock     *zmq.Socket // ZMQ socket
 }
 
-// dutMsg is a JSON message that is sent to the DuT.
+// dutMsg is the base JSON message struct for messages that are sent to the DuT.
 type dutMsg struct {
-	EvtType string `json:"evtType"`
+	EvtName string `json:"evt_name"` // event name
 }
 
-// DeviceUnderTestCreate creates and initializes new DeviceUnderTest struct.
-func DeviceUnderTestCreate(name string, ip net.IP, port uint16) DeviceUnderTest {
+// DeviceUnderTestCreate creates and initializes a new DeviceUnderTest struct.
+func DeviceUnderTestCreate(name, hostname string, port uint16) DeviceUnderTest {
 	dut := DeviceUnderTest{
-		Name: name,
-		ip:   ip,
-		port: port,
+		Name:     name,
+		hostname: hostname,
+		port:     port,
 	}
-
 	return dut
 }
 
@@ -72,20 +71,23 @@ func (dut *DeviceUnderTest) Connect() {
 	var sock *zmq.Socket
 	sock, err := zmq.NewSocket(zmq.REQ)
 	if err != nil {
-		Log(LOG_ERR, "DuT '%s': could not create socket", dut.Name)
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DuT '%s': could not create socket", dut.Name)
 	}
 
 	// connect to device endpoint
-	err = sock.Connect(fmt.Sprintf("tcp://%s:%d", dut.ip.String(), dut.port))
+	err = sock.Connect(fmt.Sprintf("tcp://%s:%d", dut.hostname, dut.port))
 	if err != nil {
-		Log(LOG_ERR, "DuT '%s': could not connect", dut.Name)
+		gofluent10g.Log(gofluent10g.LOG_ERR, "DuT '%s': could not connect",
+			dut.Name)
 	}
 
 	// save socket
 	dut.sock = sock
 
-	Log(LOG_DEBUG, "DuT '%s': connected (tcp://%s:%d)",
-		dut.Name, dut.ip, dut.port)
+	gofluent10g.Log(gofluent10g.LOG_DEBUG,
+		"DuT '%s': socket connected (tcp://%s:%d)", dut.Name, dut.hostname,
+		dut.port)
 }
 
 // Disconnect closes the connection with the DuT.
@@ -94,24 +96,32 @@ func (dut *DeviceUnderTest) Disconnect() {
 	if dut.sock != nil {
 		// disconnect
 		err := dut.sock.Disconnect(
-			fmt.Sprintf("tcp://%s:%d", dut.ip.String(), dut.port))
+			fmt.Sprintf("tcp://%s:%d", dut.hostname, dut.port))
 
 		if err != nil {
-			Log(LOG_ERR, "DuT '%s': could not disconnect", dut.Name)
+			gofluent10g.Log(gofluent10g.LOG_ERR,
+				"DuT '%s': could not disconnect", dut.Name)
 		}
 
-		Log(LOG_DEBUG, "DuT '%s': disconnected", dut.Name)
+		// reset socket
+		dut.sock = nil
+
+		gofluent10g.Log(gofluent10g.LOG_DEBUG, "DuT '%s': disconnected",
+			dut.Name)
 	}
 }
 
 // TriggerEvent triggers a remote DuT event. The function expects the event
-// type name and a JSON argument struct. The parameter blocking determines
-// whether the function call should block until the DuT acknowledged the event
-// trigger. For blocking event calls, the function returns return data that
-// can optionally be provided by the DuT. For non-blocking calls, the function
+// name and a JSON argument struct. The parameter blocking determines whether
+// the function call should block until the DuT acknowledged the event trigger.
+// For blocking event calls, the function returns return data that can
+// optionally be provided by the DuT. For non-blocking calls, the function
 // always return nil.
-func (dut *DeviceUnderTest) TriggerEvent(evtType string, args interface{},
+func (dut *DeviceUnderTest) TriggerEvent(evtName string, args interface{},
 	blocking bool) interface{} {
+	gofluent10g.Log(gofluent10g.LOG_DEBUG,
+		"DuT '%s': triggering '%s' event ...", dut.Name, evtName)
+
 	// preparte json message to be sent
 	type dutMsgArgs struct {
 		dutMsg
@@ -120,7 +130,7 @@ func (dut *DeviceUnderTest) TriggerEvent(evtType string, args interface{},
 
 	// create message
 	msg := dutMsgArgs{}
-	msg.EvtType = evtType
+	msg.EvtName = evtName
 	msg.Args = args
 
 	// send message
@@ -137,29 +147,53 @@ func (dut *DeviceUnderTest) TriggerEvent(evtType string, args interface{},
 		returnData = nil
 	}
 
-	Log(LOG_DEBUG, "DuT '%s': triggered %s event", dut.Name, evtType)
+	gofluent10g.Log(gofluent10g.LOG_DEBUG,
+		"DuT '%s': sucessfully triggered '%s' event", dut.Name, evtName)
 
 	return returnData
 }
 
-// WaitEventCompleted waits until acknowledgements for all event triggers that
-// have been issued non-blocking are received.
+// WaitEventCompleted waits until outstanding non-blocking event triggers
+// are completed.
 func (dut *DeviceUnderTest) WaitEventCompleted() {
 	// wait for DuT response
 	dut.recvRespMsg()
 }
 
+// GetMonitorData fetches and returns monitoring data from the DuT. The
+// function expects the identifier of the data that shall be fetched.
+func (dut *DeviceUnderTest) GetMonitorData(ident string) interface{} {
+	// set up event arguments
+	args := struct {
+		Ident string `json:"ident"`
+	}{
+		Ident: ident,
+	}
+
+	// trigger the blocking execution of the 'get_monitor_data' event. the
+	// event's return data contains the requested data.
+	return dut.TriggerEvent("get_monitor_data", args, true)
+}
+
 // sendMsg transmits an event message to the DuT.
 func (dut *DeviceUnderTest) sendMsg(msg interface{}) {
+	// make sure connection is active
+	if dut.sock == nil {
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DUT '%s': no connection active", dut.Name)
+	}
+
 	// marshal json message
 	data, err := json.Marshal(msg)
 	if err != nil {
-		Log(LOG_ERR, "DuT '%s': failed to encode json message", dut.Name)
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DuT '%s': failed to encode json message", dut.Name)
 	}
 
 	// send message to dut
 	if _, err := dut.sock.SendBytes(data, 0); err != nil {
-		Log(LOG_ERR, "DuT '%s': failed to send message to DuT", dut.Name)
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DuT '%s': failed to send message to DuT", dut.Name)
 	}
 }
 
@@ -167,10 +201,16 @@ func (dut *DeviceUnderTest) sendMsg(msg interface{}) {
 // answers with a NACK, the function raises an error containing the error
 // message that the DuT sent.
 func (dut *DeviceUnderTest) recvRespMsg() interface{} {
+	// make sure connection is active
+	if dut.sock == nil {
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DUT '%s': no connection active", dut.Name)
+	}
+
 	// wait for response from dut
 	data, err := dut.sock.RecvBytes(0)
 	if err != nil {
-		Log(LOG_ERR,
+		gofluent10g.Log(gofluent10g.LOG_ERR,
 			"DuT '%s': failed to received response message", dut.Name)
 	}
 
@@ -178,9 +218,9 @@ func (dut *DeviceUnderTest) recvRespMsg() interface{} {
 	var respMsg dutMsg
 	json.Unmarshal(data, &respMsg)
 
-	if respMsg.EvtType == "nack" {
-		// received message is a NACK, so some kind of error occur on the
-		// DuT-side. Convert message to extract the reason from the JSON
+	if respMsg.EvtName == "nack" {
+		// received message is a nack, so some kind of error occured on the
+		// dut-side. convert message to extract the reason from the json
 		// message.
 		type dutMsgNack struct {
 			dutMsg
@@ -194,17 +234,18 @@ func (dut *DeviceUnderTest) recvRespMsg() interface{} {
 		json.Unmarshal(data, &respMsgNack)
 
 		// raise error reported by the dut
-		Log(LOG_ERR, "DuT '%s': DuT reported: '%s'", dut.Name,
-			respMsgNack.Args.Reason)
+		gofluent10g.Log(gofluent10g.LOG_ERR, "DuT '%s': DuT reported: '%s'",
+			dut.Name, respMsgNack.Args.Reason)
 
+		// no return data
 		return nil
-	} else if respMsg.EvtType == "ack" {
-		// message is a ACK. In some cases, return data may be provided.
+	} else if respMsg.EvtName == "ack" {
+		// message is a ack. In some cases, return data may be provided.
 		// convert message and extract it from JSON data
 		type dutMsgAck struct {
 			dutMsg
 			Args struct {
-				ReturnData interface{} `json:"returnData"`
+				ReturnData interface{} `json:"return_data"`
 			} `json:"args"`
 		}
 
@@ -213,8 +254,8 @@ func (dut *DeviceUnderTest) recvRespMsg() interface{} {
 		json.Unmarshal(data, &respMsgAck)
 		return respMsgAck.Args.ReturnData
 	} else {
-		Log(LOG_ERR, "DuT '%s': received message with invalid message type",
-			dut.Name)
+		gofluent10g.Log(gofluent10g.LOG_ERR,
+			"DuT '%s': received message with invalid event name", dut.Name)
 		return nil
 	}
 }

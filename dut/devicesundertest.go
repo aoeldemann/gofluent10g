@@ -27,7 +27,7 @@
 //
 // Implements communication with multipe devices-under-test at once.
 
-package gofluent10g
+package dut
 
 // DevicesUnderTest is a slice type holding DeviceUnderTest structs. The.
 // receiver functions defined on it allow easy control of multiple DuTs at once.
