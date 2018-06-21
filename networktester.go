@@ -123,7 +123,7 @@ func NetworkTesterCreate() *NetworkTester {
 	nt.timestamp = &timestamp{
 		nt:            &nt,
 		cyclesPerTick: TIMESTAMP_CNTR_CYCLES_PER_TICK_DEFAULT,
-		mode:          TimestampModeHeader,
+		mode:          TimestampModeDisabled,
 	}
 
 	// return the created instance

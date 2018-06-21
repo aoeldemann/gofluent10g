@@ -47,8 +47,9 @@ type timestamp struct {
 }
 
 const (
-	TimestampModeFixedPos int = 0
-	TimestampModeHeader   int = 1
+	TimestampModeDisabled int = 0
+	TimestampModeFixedPos int = 1
+	TimestampModeHeader   int = 2
 )
 
 // setCyclesPerTick sets the number of clock cycles that shall pass between
@@ -67,7 +68,8 @@ func (timestamp *timestamp) getTickPeriod() float64 {
 // to 'TimestampModeHeader', the timestamp is inserted into the header of IPv4
 // or IPv6 packets (checksum or flowtlabel field respectively). If the mode is
 // set to 'TimestampModeFixedPos', the timestamp is inserted in the packet data
-// at a configurable byte position.
+// at a configurable byte position. If the mode is set to
+// 'TimestampModeDisabled', no timestamp is inserted at all.
 func (timestamp *timestamp) setMode(mode int) {
 	if mode != TimestampModeFixedPos && mode != TimestampModeHeader {
 		Log(LOG_ERR, "Timestamp: invalid timestamping mode")
@@ -138,6 +140,12 @@ func (timestamp *timestamp) configHardware() {
 			CPUREG_OFFSET_NT_TIMESTAMP_POS, 0x0)
 		timestamp.nt.pcieBAR.Write(ADDR_BASE_NT_TIMESTAMP+
 			CPUREG_OFFSET_NT_TIMESTAMP_WIDTH, 0x0)
+	} else if timestamp.mode == TimestampModeDisabled {
+		// reset timestamp position and width to zero
+		timestamp.nt.pcieBAR.Write(ADDR_BASE_NT_TIMESTAMP+
+			CPUREG_OFFSET_NT_TIMESTAMP_POS, 0x0)
+		timestamp.nt.pcieBAR.Write(ADDR_BASE_NT_TIMESTAMP+
+			CPUREG_OFFSET_NT_TIMESTAMP_WIDTH, 0x0)
 	} else {
 		Log(LOG_ERR, "Timestamp: invalid mode")
 	}
@@ -160,5 +168,7 @@ func (timestamp *timestamp) configHardware() {
 			timestamp.width)
 	} else if timestamp.mode == TimestampModeHeader {
 		Log(LOG_DEBUG, "Timestamp: mode 'TimestampModeHeader'")
+	} else if timestamp.mode == TimestampModeDisabled {
+		Log(LOG_DEBUG, "Timestamp: mode 'TimestampModeDisabled'")
 	}
 }
