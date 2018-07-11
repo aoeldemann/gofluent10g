@@ -47,7 +47,7 @@ const (
 	TIMESTAMP_CNTR_CYCLES_PER_TICK_DEFAULT = 1
 
 	// expected hardware identification values. will be checked upon
-	initialization
+	// initialization
 	HW_CRC16   = 0xf15e
 	HW_VERSION = 0x000d
 
