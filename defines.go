@@ -60,6 +60,12 @@ const (
 	// amount of host memory that is reserved for capture data for each network
 	// interface on which capturing is enabled (default value)
 	CAPTURE_HOST_MEM_SIZE_DEFAULT = 4 * 1024 * 1024 * 1024
+
+	// the MACs and PHYs of the network tester FPGA introduce packet latencies
+	// that shall not be included when measuring the latency of a DuT. We
+	// determined the median latency induced by the network tester to be 64
+	// clock cycles
+	LATENCY_ERR_CORRECTION_CYCLES = 64
 )
 
 // PCIExpress device names

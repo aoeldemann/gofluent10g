@@ -84,7 +84,12 @@ func (capture *Capture) GetPackets() CapturePackets {
 		// extract latency value, if present
 		var latency float64
 		if hasLatency {
+			// calculate latency in seconds
 			latency = float64(meta&0xFFFFFF) * capture.tickPeriodLatency
+
+			// subtract latency error induced by the MACs and PHYs of the
+			// network tester itself
+			latency -= float64(LATENCY_ERR_CORRECTION_CYCLES) / FREQ_SFP
 		}
 
 		// get packet's arrival-time (time since previous packet arrived, the
