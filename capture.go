@@ -69,7 +69,7 @@ func (capture *Capture) GetPackets() CapturePackets {
 	var pkts CapturePackets
 	var posRd uint64
 
-	for {
+	for posRd < capture.posWr {
 		// get 8 byte meta data word
 		meta := binary.LittleEndian.Uint64(capture.data[posRd : posRd+8])
 
@@ -124,11 +124,6 @@ func (capture *Capture) GetPackets() CapturePackets {
 			posRd += 8 + lenCapture
 		} else {
 			posRd += 16 + lenCapture - lenCapture%8
-		}
-
-		if posRd >= capture.posWr {
-			// we are done!
-			break
 		}
 	}
 
