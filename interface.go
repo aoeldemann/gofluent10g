@@ -31,11 +31,16 @@
 
 package gofluent10g
 
+import (
+	"time"
+)
+
 // Interface is the struct providing methods for obtaining the number of packets
 // that have been transmitted and received by the network interface.
 type Interface struct {
-	nt *NetworkTester
-	id int
+	nt                     *NetworkTester
+	id                     int
+	datarateSampleInterval time.Duration
 }
 
 // GetPacketCountRX returns the number of packets received on the interface.
@@ -50,6 +55,47 @@ func (iface *Interface) GetPacketCountTX() int {
 	nPkts := iface.nt.pcieBAR.Read(
 		ADDR_BASE_IFACE[iface.id] + CPUREG_OFFSET_IF_N_PKTS_TX)
 	return int(nPkts)
+}
+
+// SetDatarateSampleInterval sets the sample interval with which the hardware
+// should evaluate the RX and TX data rates on the interface.
+func (iface *Interface) SetDatarateSampleInterval(sampleInterval time.Duration) {
+	// store sample interval
+	iface.datarateSampleInterval = sampleInterval
+
+	// convert sample interval to number of clock cycles
+	sampleIntervalCycles := uint32(sampleInterval.Seconds() * FREQ_SFP)
+
+	// write sample interval to hardware
+	iface.nt.pcieBAR.Write(ADDR_BASE_NT_DATARATE[iface.id]+
+		CPUREG_OFFSET_NT_DATARATE_CTRL_SAMPLE_INTERVAL, sampleIntervalCycles)
+}
+
+// GetDatrateTX returns the nominal and raw TX data rates observed at the
+// interface in the last second (in Gbps).
+func (iface *Interface) GetDatrateTX() (float64, float64) {
+	// get number of bytes transmitted in last sample interval
+	nBytes := iface.nt.pcieBAR.Read(ADDR_BASE_NT_DATARATE[iface.id] +
+		CPUREG_OFFSET_NT_DATARATE_STATUS_TX_N_BYTES)
+	nBytesRaw := iface.nt.pcieBAR.Read(ADDR_BASE_NT_DATARATE[iface.id] +
+		CPUREG_OFFSET_NT_DATARATE_STATUS_TX_N_BYTES_RAW)
+
+	// return nominal and raw datarates
+	return 8.0 * float64(nBytes) / iface.datarateSampleInterval.Seconds() / 1e9,
+		8.0 * float64(nBytesRaw) / iface.datarateSampleInterval.Seconds() / 1e9
+}
+
+// GetDatrateRX returns the nominal and raw RX data rates observed at the
+// interface in the last second (in Gbps).
+func (iface *Interface) GetDatrateRX() (float64, float64) {
+	nBytes := iface.nt.pcieBAR.Read(ADDR_BASE_NT_DATARATE[iface.id] +
+		CPUREG_OFFSET_NT_DATARATE_STATUS_RX_N_BYTES)
+	nBytesRaw := iface.nt.pcieBAR.Read(ADDR_BASE_NT_DATARATE[iface.id] +
+		CPUREG_OFFSET_NT_DATARATE_STATUS_RX_N_BYTES_RAW)
+
+	// return nominal and raw datarates
+	return 8.0 * float64(nBytes) / iface.datarateSampleInterval.Seconds() / 1e9,
+		8.0 * float64(nBytesRaw) / iface.datarateSampleInterval.Seconds() / 1e9
 }
 
 // resetHardware resets the network interfaces.

@@ -34,10 +34,11 @@
 package gofluent10g
 
 import (
-	"github.com/aoeldemann/gopcie"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/aoeldemann/gopcie"
 )
 
 // NetworkTester is the toplevel struct providing methods for configuring the
@@ -55,6 +56,9 @@ type NetworkTester struct {
 
 	syncCapture sync.WaitGroup
 	stopCapture chan bool
+
+	syncPrintDatarate sync.WaitGroup
+	stopPrintDatarate chan bool
 
 	checkErrors bool
 }
@@ -372,7 +376,30 @@ func (nt *NetworkTester) CheckErrors() error {
 	return nil
 }
 
-// capture continously reads the receiver ring buffers. It must be started in
+// PrintDataratesStart starts a thread that periodically prints out RX and TX
+// data rates of all network interfaces. Expects data rate sampling period/
+// print out frequency as parameter.
+func (nt *NetworkTester) PrintDataratesStart(sampleInterval time.Duration) {
+	// configure sample interval in hardware
+	for _, iface := range nt.ifaces {
+		iface.SetDatarateSampleInterval(sampleInterval)
+	}
+
+	// set up and start thread
+	nt.stopPrintDatarate = make(chan bool)
+	nt.syncPrintDatarate.Add(1)
+	go nt.printDatarates(sampleInterval)
+}
+
+// PrintDataratesStop stops the thread that periodically prints out RX and TX
+// data rates.
+func (nt *NetworkTester) PrintDataratesStop() {
+	// stop thread and wait for completion
+	nt.stopPrintDatarate <- true
+	nt.syncPrintDatarate.Wait()
+}
+
+// capture continuously reads the receiver ring buffers. It must be started in
 // a goroutine.
 func (nt *NetworkTester) capture() {
 	defer nt.syncCapture.Done()
@@ -543,7 +570,7 @@ func (nt *NetworkTester) assignMemory() {
 	}
 }
 
-// config trigger the hardware core configuration.
+// configHardware triggers the hardware core configuration.
 func (nt *NetworkTester) configHardware() {
 	// write generator configuration to hardware
 	nt.gens.configHardware()
@@ -596,4 +623,40 @@ func (nt *NetworkTester) checkVersion() {
 	}
 
 	Log(LOG_DEBUG, "Network tester hardware version: 0x%04x", hwVersion)
+}
+
+// printDatarates periodically prints out RX and TX data rates of all network
+// interfaces. Expects data rate sampling period/print out frequency as
+// parameter.
+func (nt *NetworkTester) printDatarates(sampleInterval time.Duration) {
+	defer nt.syncPrintDatarate.Done()
+
+	// get interfaces
+	ifaces := nt.GetInterfaces()
+
+	var stop bool
+	for {
+		select {
+		case _ = <-nt.stopPrintDatarate:
+			// goroutine stop requested
+			stop = true
+		default:
+		}
+
+		if stop {
+			break
+		}
+
+		// iterate over interfaces and print out their rx and tx data rates
+		for _, iface := range ifaces {
+			datarateTX, datarateTXRaw := iface.GetDatrateTX()
+			datarateRX, datarateRXRaw := iface.GetDatrateRX()
+			Log(LOG_INFO, "Datarate IF%d: %.3f/%.3f (TX Nom/Raw), %.3f/%.3f (RX Nom/Raw)",
+				iface.id, datarateTX, datarateTXRaw, datarateRX, datarateRXRaw)
+		}
+		Log(LOG_INFO, "----------------------------------------------------------------")
+
+		// wait until hardware data rate counters are updated again
+		time.Sleep(sampleInterval)
+	}
 }
