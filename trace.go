@@ -179,7 +179,9 @@ func (trace *Trace) GetData() []byte {
 // read reads data from the input trace file. The function expects the address
 // from which shall be read and the number of bytes that shall be read. In case
 // a trace file is replayed multiple times, the address parameter may be larger
-// than the trace file. This function handles the wrap-around.
+// than the trace file. The function may return less than the number of bytes
+// specified to be read, if a host memory wrap-around occurs when a trace is
+// replayed multiple times.
 func (trace *Trace) read(addr uint64, size uint32) []byte {
 	// make sure the provided address is within the valid range
 	if addr > uint64(trace.nRepeats)*trace.size {
@@ -189,22 +191,13 @@ func (trace *Trace) read(addr uint64, size uint32) []byte {
 	if addr/trace.size != (addr+uint64(size)-1)/trace.size {
 		// file read extends across wrap-around memory boundary
 
-		// number of bytes to read until end of file
-		size1 := uint32(trace.size - addr%trace.size)
+		// number of bytes to read until end of trace
+		sizeRemaining := uint32(trace.size - addr%trace.size)
 
-		// number of bytes remaining to be read from beginning of file
-		size2 := size - size1
-
-		// create empty slice
-		data := make([]byte, size)
-
-		// copy data to slice
-		copy(data[0:size1],
-			trace.data[addr%trace.size:addr%trace.size+uint64(size1)])
-		copy(data[size1:], trace.data[0:size2])
-
-		return data
+		// return smaller data block
+		return trace.data[addr%trace.size : addr%trace.size+uint64(sizeRemaining)]
 	}
+
 	// file read does not extend across wrap-around memory boundary
 	return trace.data[addr%trace.size : addr%trace.size+uint64(size)]
 }

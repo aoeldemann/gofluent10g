@@ -240,6 +240,13 @@ func (gen *Generator) writeRingBuff() uint32 {
 	// read data from trace file
 	data := gen.trace.read(traceSize-traceSizeOutStanding, transferSize)
 
+	// in case a trace is repeatedly being replayed, it may occur that the data
+	// that can be moved with the DMA transfer is smaller than the requested
+	// block size (host memory wrap-around)
+	if uint32(len(data)) < transferSize {
+		transferSize = uint32(len(data))
+	}
+
 	// take time before starting dma transfer
 	transferStartTime := time.Now()
 
