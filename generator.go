@@ -316,18 +316,8 @@ func (gen *Generator) isActive() bool {
 // parameter exit is set to true, the application exits if an error was
 // detected.
 func (gen *Generator) checkError(exit bool) error {
-	// check replay module errors
-	status := gen.nt.pcieBAR.Read(ADDR_BASE_NT_GEN_REPLAY[gen.id] +
-		CPUREG_OFFSET_NT_GEN_REPLAY_STATUS)
-	if (status & 0x4) > 0 {
-		if exit {
-			Log(LOG_ERR, "Generator %d: FIFO drain failed", gen.id)
-		}
-		return fmt.Errorf("Generator %d: FIFO drain failed", gen.id)
-	}
-
 	// check rate control module errors
-	status = gen.nt.pcieBAR.Read(ADDR_BASE_NT_GEN_RATE_CTRL[gen.id] +
+	status := gen.nt.pcieBAR.Read(ADDR_BASE_NT_GEN_RATE_CTRL[gen.id] +
 		CPUREG_OFFSET_NT_GEN_RATE_CTRL_STATUS)
 	if (status & 0x1) > 0 {
 		if exit {

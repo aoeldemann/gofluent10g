@@ -49,7 +49,7 @@ const (
 	// expected hardware identification values. will be checked upon
 	// initialization
 	HW_CRC16   = 0xf15e
-	HW_VERSION = 0x000d
+	HW_VERSION = 0x000e
 
 	// maximum size of a ring buffer write
 	RING_BUFF_WR_TRANSFER_SIZE_MAX = 64 * 1024 * 1024
