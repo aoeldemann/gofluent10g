@@ -510,13 +510,13 @@ func (nt *NetworkTester) assignMemory() {
 			// only one receiver -> assign entire DDR_A
 			nt.recvs[recvIds[0]].ringBuffAddr = ADDR_DDR_A
 			nt.recvs[recvIds[0]].ringBuffAddrRange = ADDR_RANGE_DDR_A
-		} else if nGens == 2 {
+		} else if nRecvs == 2 {
 			// one receiver gets DDR_A, the other one DDR_B
 			nt.recvs[recvIds[0]].ringBuffAddr = ADDR_DDR_A
 			nt.recvs[recvIds[0]].ringBuffAddrRange = ADDR_RANGE_DDR_A
 			nt.recvs[recvIds[1]].ringBuffAddr = ADDR_DDR_B
 			nt.recvs[recvIds[1]].ringBuffAddrRange = ADDR_RANGE_DDR_B
-		} else if nGens == 3 {
+		} else if nRecvs == 3 {
 			// first two receivers share DDR_A, third one gets DDR_B
 			nt.recvs[recvIds[0]].ringBuffAddr = ADDR_DDR_A
 			nt.recvs[recvIds[0]].ringBuffAddrRange =
@@ -527,7 +527,7 @@ func (nt *NetworkTester) assignMemory() {
 				uint32((uint64(ADDR_RANGE_DDR_A)+1)/2 - 1)
 			nt.recvs[recvIds[2]].ringBuffAddr = ADDR_DDR_B
 			nt.recvs[recvIds[2]].ringBuffAddrRange = ADDR_RANGE_DDR_B
-		} else if nGens == 4 {
+		} else if nRecvs == 4 {
 			// first two receivers share DDR_A, third and fourth share DDR_B
 			nt.recvs[recvIds[0]].ringBuffAddr = ADDR_DDR_A
 			nt.recvs[recvIds[0]].ringBuffAddrRange =
