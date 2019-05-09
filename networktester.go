@@ -113,9 +113,8 @@ func NetworkTesterCreate() *NetworkTester {
 			id: i,
 		}
 		nt.recvs[i] = &Receiver{
-			nt:                 &nt,
-			id:                 i,
-			captureHostMemSize: CAPTURE_HOST_MEM_SIZE_DEFAULT,
+			nt: &nt,
+			id: i,
 		}
 		nt.ifaces[i] = &Interface{
 			nt: &nt,

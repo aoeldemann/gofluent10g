@@ -34,6 +34,6 @@ type CapturePacket struct {
 	ArrivalTime float64
 	HasLatency  bool
 	Latency     float64
-	LenWire     uint
+	Wirelen     int
 	Data        []byte
 }

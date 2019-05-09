@@ -51,12 +51,10 @@ type Receiver struct {
 	nt *NetworkTester
 	id int
 
-	captureEnable  bool // determines whether capturing is enabled
-	captureDiscard bool // determines whehter capture data will be discarded
-	captureMaxLen  int  // maximum packet data capture length
+	captureEnable bool // determines whether capturing is enabled
+	captureLength int  // per-packet packet data capture length
 
-	capture            *Capture // capture instance
-	captureHostMemSize uint64   // host memory size for capture data
+	capture *Capture // capture instance
 
 	// ring buffer memory address, size and read pointer position
 	ringBuffAddr      uint64
@@ -68,48 +66,49 @@ type Receiver struct {
 	filterMACAddrMaskDst uint64
 }
 
-// EnableCapture enables/disables capturing of packet and/or meta data.
-func (recv *Receiver) EnableCapture(enable bool) {
-	recv.captureEnable = enable
+// EnableCapture enables packet capturing. caplen determins the per-packet
+// capture length, i.e. the number of bytes of each packet that shall be
+// captured. All packet data exceeding the capture length is cut off. If caplen
+// is set to zero, only packet meta data (i.e. arrival-time, latency, ...) is
+// captured. For caplen > 0, packet data and meta data is captured. hostMemSize
+// determines the size of the memory to be reserved in host memory for capture
+// data.
+func (recv *Receiver) EnableCapture(caplen int, hostMemSize int) {
+	// make sure capture length is within a reasonable range
+	if caplen < 0 || caplen > 1518 {
+		Log(LOG_ERR, "Receiver %d: capture length must be in the range of "+
+			"0 and 1518 bytes", recv.id)
+	}
+
+	// make sure hostMemSize is at least one DMA transfer block size
+	if hostMemSize < RING_BUFF_RD_TRANSFER_SIZE_MIN {
+		Log(LOG_ERR, "Receiver %d: host memory capture size must be at "+
+			"least %d bytes", RING_BUFF_RD_TRANSFER_SIZE_MIN)
+	}
+
+	recv.captureEnable = true
+	recv.captureLength = caplen
+
+	// host memory size must be a multiple of 64 bytes
+	if hostMemSize%64 != 0 {
+		hostMemSize = 64 * (hostMemSize/64 + 1)
+	}
+
+	// reserve memory for capture data
+	captureData := make([]byte, hostMemSize)
+
+	// create capture instance
+	recv.capture = &Capture{
+		data:              captureData,
+		tickPeriodLatency: recv.nt.timestamp.getTickPeriod(),
+		caplen:            caplen,
+	}
 }
 
-// SetCaptureDiscard enalbes/disables the discarding of captured data. If
-// the function is enabled, the capture data will be fetched from the hardware,
-// but will be discarded after it has been fetched. This is helpful for
-// debugging and network tester performance analysis without consuming huge
-// amounts of memory for capture data.
-func (recv *Receiver) SetCaptureDiscard(discard bool) {
-	if recv.captureEnable == false {
-		Log(LOG_ERR, "Receiver %d: could not enable/disable capture discard, "+
-			"because capturing is disabled", recv.id)
-	}
-	recv.captureDiscard = discard
-}
-
-// SetCaptureMaxLen sets the maximum number of per-packet capture bytes.
-func (recv *Receiver) SetCaptureMaxLen(maxLen int) {
-	if recv.captureEnable == false {
-		Log(LOG_ERR, "Receiver %d: could not set maximum capture length, "+
-			"because capturing is disabled", recv.id)
-	}
-
-	recv.captureMaxLen = maxLen
-}
-
-// SetCaptureHostMemSize sets the size of the host memory that shall be reserved
-// for capture data.
-func (recv *Receiver) SetCaptureHostMemSize(size uint64) {
-	if recv.captureEnable == false {
-		Log(LOG_ERR, "Receiver %d: could not set capture host memory size, "+
-			"because capturing is disabled", recv.id)
-	}
-
-	// 64 byte alignment
-	if size%64 == 0 {
-		recv.captureHostMemSize = size
-	} else {
-		recv.captureHostMemSize = 64 * (size/64 + 1)
-	}
+// DisableCapture disabled packet capturing.
+func (recv *Receiver) DisableCapture() {
+	recv.captureEnable = false
+	recv.capture = nil
 }
 
 // GetCapture returns Capture instance assigned to the receiver.
@@ -234,16 +233,11 @@ func (recv *Receiver) configHardware() {
 	// configure maximum capture length
 	pcieBAR.Write(ADDR_BASE_NT_RECV_CAPTURE[recv.id]+
 		CPUREG_OFFSET_NT_RECV_CAPTURE_CTRL_MAX_LEN_CAPTURE,
-		uint32(recv.captureMaxLen))
+		uint32(recv.captureLength))
 
 	Log(LOG_DEBUG,
 		"Receiver %d: capturing up to %d bytes of packet data", recv.id,
-		recv.captureMaxLen)
-
-	// create capture memory instance
-	recv.capture = captureCreate(recv.nt, recv.captureHostMemSize,
-		recv.nt.timestamp.getTickPeriod(), recv.captureMaxLen,
-		recv.captureDiscard)
+		recv.captureLength)
 
 	// setup mac address filter dst
 	if recv.filterMACAddrDst != nil {
