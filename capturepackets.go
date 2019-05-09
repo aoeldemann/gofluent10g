@@ -29,13 +29,21 @@
 
 package gofluent10g
 
+import (
+	"fmt"
+	"os"
+)
+
 // CapturePackets is a slice containing CapturePacket structs.
 type CapturePackets []CapturePacket
 
+// Latencies is a slice containing floating point latency values
+type Latencies []float64
+
 // GetLatencies returns a list containing the recorded latency for timestamped
 // packets.
-func (pkts CapturePackets) GetLatencies() []float64 {
-	var latencies []float64
+func (pkts CapturePackets) GetLatencies() Latencies {
+	var latencies Latencies
 
 	for _, pkt := range pkts {
 		if pkt.HasLatency {
@@ -71,4 +79,20 @@ func (pkts CapturePacketsSortByLatency) Swap(i, j int) {
 
 func (pkts CapturePacketsSortByLatency) Less(i, j int) bool {
 	return pkts[i].Latency < pkts[j].Latency
+}
+
+// WriteToFile writes the captured latency values to an output file. It writes
+// one floating point latency value per line.
+func (latencies Latencies) WriteToFile(filename string) {
+	// create file
+	f, err := os.Create(filename)
+	if err != nil {
+		Log(LOG_ERR, "could not create latency file '%s'", filename)
+	}
+	defer f.Close()
+
+	// write latency values to file
+	for _, latency := range latencies {
+		fmt.Fprintf(f, "%.9f\n", latency)
+	}
 }
