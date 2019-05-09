@@ -49,7 +49,7 @@ var (
 	logWarn        *log.Logger
 	logError       *log.Logger
 	logIndentLevel uint
-	logLevel       = LOG_DEBUG
+	logLevel       = LOG_INFO
 )
 
 // Log prints out a log message with a specifiable log level.
