@@ -429,18 +429,11 @@ func (recv *Receiver) stop() {
 	// wait a little bit to give receiver time to become inactive and flush
 	// its fifo contents to the memory
 	time.Sleep(time.Second)
-
-	// make sure module is inactive
-	active := recv.nt.pcieBAR.Read(ADDR_BASE_NT_RECV_CAPTURE[recv.id] +
-		CPUREG_OFFSET_NT_RECV_CAPTURE_STATUS_ACTIVE)
-	if active != 0x0 {
-		Log(LOG_ERR, "Receiver %d: module does not become inactive", recv.id)
-	}
 }
 
-// checkError checks if the hardware flagged an error during capturing. If the
-// parameter exit is set to true, the application exits if an error was
-// detected.
+// checkError checks if the hardware flagged an error during capturing or if
+// capturing is still active. If the parameter exit is set to true, the
+// application exits if an error was detected.
 func (recv *Receiver) checkError(exit bool) error {
 	errs := recv.nt.pcieBAR.Read(ADDR_BASE_NT_RECV_CAPTURE[recv.id] +
 		CPUREG_OFFSET_NT_RECV_CAPTURE_STATUS_ERRS)
@@ -455,6 +448,15 @@ func (recv *Receiver) checkError(exit bool) error {
 			Log(LOG_ERR, "Receiver %d: data FIFO full", recv.id)
 		}
 		return fmt.Errorf("Receiver %d: data FIFO full", recv.id)
+	}
+
+	active := recv.nt.pcieBAR.Read(ADDR_BASE_NT_RECV_CAPTURE[recv.id] +
+		CPUREG_OFFSET_NT_RECV_CAPTURE_STATUS_ACTIVE)
+	if active != 0x0 {
+		if exit {
+			Log(LOG_ERR, "Received %d: still active", recv.id)
+		}
+		return fmt.Errorf("Receiver %d: still active", recv.id)
 	}
 	return nil
 }
