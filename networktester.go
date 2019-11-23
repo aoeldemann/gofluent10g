@@ -34,6 +34,7 @@
 package gofluent10g
 
 import (
+	"math"
 	"runtime"
 	"sync"
 	"time"
@@ -46,19 +47,16 @@ import (
 // receiver, interface and timestamp counter submodules.
 type NetworkTester struct {
 	pcieBAR      *gopcie.PCIeBAR
-	pcieDMAWrite *gopcie.PCIeDMA
-	pcieDMARead  *gopcie.PCIeDMA
+	pcieDMAWrite []*gopcie.PCIeDMA
+	pcieDMARead  []*gopcie.PCIeDMA
 
 	gens      Generators // slice of *Generator
 	recvs     Receivers  // slice of *Receiver
 	ifaces    Interfaces // slice of *Interface
 	timestamp *timestamp
 
-	syncCapture sync.WaitGroup
-	stopCapture chan bool
-
-	syncPrintDatarate sync.WaitGroup
-	stopPrintDatarate chan bool
+	syncReplay, syncCapture, syncPrintDatarate sync.WaitGroup // goroutine synchronization
+	stopReplay, stopCapture, stopPrintDatarate chan bool      // goroutine synchronization
 
 	checkErrors bool
 }
@@ -76,17 +74,23 @@ func NetworkTesterCreate() *NetworkTester {
 	}
 
 	// open PCIExpress DMA for writing
-	pcieDMAWrite, err := gopcie.PCIeDMAOpen(PCIE_XDMA_DEV_H2C,
-		gopcie.PCIE_ACCESS_WRITE)
-	if err != nil {
-		Log(LOG_ERR, err.Error())
+	pcieDMAWrite := make([]*gopcie.PCIeDMA, len(PCIE_XDMA_DEV_H2C))
+	for i := 0; i < len(PCIE_XDMA_DEV_H2C); i++ {
+		pcieDMAWrite[i], err = gopcie.PCIeDMAOpen(PCIE_XDMA_DEV_H2C[i],
+			gopcie.PCIE_ACCESS_WRITE)
+		if err != nil {
+			Log(LOG_ERR, err.Error())
+		}
 	}
 
 	// open PCIExpress DMA for reading
-	pcieDMARead, err := gopcie.PCIeDMAOpen(PCIE_XDMA_DEV_C2H,
-		gopcie.PCIE_ACCESS_READ)
-	if err != nil {
-		Log(LOG_ERR, err.Error())
+	pcieDMARead := make([]*gopcie.PCIeDMA, len(PCIE_XDMA_DEV_C2H))
+	for i := 0; i < len(PCIE_XDMA_DEV_C2H); i++ {
+		pcieDMARead[i], err = gopcie.PCIeDMAOpen(PCIE_XDMA_DEV_C2H[i],
+			gopcie.PCIE_ACCESS_READ)
+		if err != nil {
+			Log(LOG_ERR, err.Error())
+		}
 	}
 
 	// create instance of NetworkTester struct
@@ -136,8 +140,12 @@ func NetworkTesterCreate() *NetworkTester {
 // Close closes the connection to the network tester hardware.
 func (nt *NetworkTester) Close() {
 	nt.pcieBAR.Close()
-	nt.pcieDMAWrite.Close()
-	nt.pcieDMARead.Close()
+	for _, pcieDMAWrite := range nt.pcieDMAWrite {
+		pcieDMAWrite.Close()
+	}
+	for _, pcieDMARead := range nt.pcieDMARead {
+		pcieDMARead.Close()
+	}
 }
 
 // GetGenerator returns a generator instance by its interface ID.
@@ -221,42 +229,69 @@ func (nt *NetworkTester) WriteConfig() {
 // StartReplay triggers the start of packet generation on all configured
 // generators. The function blocks until generation has finished.
 func (nt *NetworkTester) StartReplay() {
-	Log(LOG_DEBUG, "Replay: filling up TX ring buffers ...")
-
-	// pre-fill ring buffers
-	for {
-		// write data to ring buffers. function returns the total number of
-		// bytes that have been transferred
-		nTransferedBytes := nt.gens.writeRingBuffs()
-
-		if nTransferedBytes == 0 {
-			// no data has been transferred -> ring buffers are full or there
-			// is no more data to be transferred
-			break
+	// create a list holding all generators for which traffic replay is
+	// configured, i.e. a trace has been assigned
+	var gens Generators
+	for _, gen := range nt.gens {
+		if gen.trace != nil {
+			gens = append(gens, gen)
 		}
 	}
 
-	Log(LOG_DEBUG, "Replay: TX ring buffers are filled up. Starting now ...")
+	// how many generators will be served by each goroutine at most?
+	nGensPerGoroutine := int(math.Ceil(float64(len(gens)) / float64(len(nt.pcieDMAWrite))))
+
+	// initialize a list, which for each goroutine will hold a list cotaining
+	// the generators it serves
+	gensPerGoroutine := make([]Generators, len(nt.pcieDMAWrite))
+
+	// assemble the list
+	iGoroutine := 0
+	for _, gen := range gens {
+		gensPerGoroutine[iGoroutine] = append(gensPerGoroutine[iGoroutine], gen)
+
+		if len(gensPerGoroutine[iGoroutine]) == nGensPerGoroutine {
+			iGoroutine++
+		}
+	}
+
+	// set up goroutine synchronization for stopping later
+	nt.stopReplay = make(chan bool)
+	nt.syncReplay.Add(len(nt.pcieDMAWrite))
+
+	// start the goroutines, which will continuously fill the ring buffers
+	for i, gens := range gensPerGoroutine {
+		go nt.replay(gens, nt.pcieDMAWrite[i])
+	}
+
+	// wait a little bit
+	time.Sleep(500 * time.Millisecond)
 
 	// trigger generators to start reading from ring buffers
 	nt.gens.start()
 
 	// wait a little bit so transmission fifos can fill up
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// start rate control module to drain fifos and transmit packets with
 	// the timing denoted in the trace
 	nt.gens.startRateCtrl(nt.pcieBAR)
 
+	// wait for generators to become inactive
 	for {
-		// continuously fill up ring buffers
-		nt.gens.writeRingBuffs()
-
 		if nt.gens.areActive() == false {
 			// all generators finished draining data from the TX ring buffers
 			break
 		}
+		time.Sleep(time.Second)
 	}
+
+	// trigger the goroutines filling the ring buffers to stop and wait for them
+	// to complete
+	for i := 0; i < len(nt.pcieDMAWrite); i++ {
+		nt.stopReplay <- true
+	}
+	nt.syncReplay.Wait()
 
 	//  -----------        -----------        --------------        -----
 	// | DRAM TX   |      | Block RAM |      | Rate Control |      | MAC |
@@ -296,22 +331,69 @@ func (nt *NetworkTester) StartReplay() {
 // StartCapture stats packet capturing on all configured interfaces. The
 // function is non-blocking.
 func (nt *NetworkTester) StartCapture() {
-	// initialize a channel we will later use to request the stop of the
-	// goroutine
-	nt.stopCapture = make(chan bool)
+	// create a list holding all receivers for which traffic replay is enabled
+	var recvs Receivers
+	for _, recv := range nt.recvs {
+		if recv.captureEnable {
+			recvs = append(recvs, recv)
+		}
+	}
 
-	// start goroutine and increment waiting group for sync
-	nt.syncCapture.Add(1)
-	go nt.capture()
+	// how many receivers will be served by each goroutine at most?
+	nRecvsPerGoroutine := int(math.Ceil(float64(len(recvs)) / float64(len(nt.pcieDMARead))))
+
+	// initialize a list, which for each goroutine will hold a list cotaining
+	// the receivers it serves
+	recvsPerGoroutine := make([]Receivers, len(nt.pcieDMARead))
+
+	// assemble the list
+	iGoroutine := 0
+	for _, recv := range recvs {
+		recvsPerGoroutine[iGoroutine] = append(recvsPerGoroutine[iGoroutine], recv)
+
+		if len(recvsPerGoroutine[iGoroutine]) == nRecvsPerGoroutine {
+			iGoroutine++
+		}
+	}
+
+	// set up goroutine synchronization for stopping later
+	nt.stopCapture = make(chan bool)
+	nt.syncCapture.Add(len(nt.pcieDMARead))
+
+	// start the goroutines, which will continuously read the ring buffers
+	for i, recvs := range recvsPerGoroutine {
+		go nt.capture(recvs, nt.pcieDMARead[i])
+	}
+
+	// trigger hardware to start capturing
+	nt.recvs.start()
 }
 
 // StopCapture stops the capturing of packet data and packet latency on all
 // configured receivers.
 func (nt *NetworkTester) StopCapture() {
-	// trigger the goroutine reading the ring buffers to stop and wait for it to
-	// complete
-	nt.stopCapture <- true
+	// trigger hardware to stop capturing
+	nt.recvs.stop()
+
+	// trigger the goroutines reading the ring buffers to stop and wait for them
+	// to complete
+	for i := 0; i < len(nt.pcieDMARead); i++ {
+		nt.stopCapture <- true
+	}
 	nt.syncCapture.Wait()
+
+	// drain remaining RX ring buffer contents (all through the same PCI Express
+	// device, as performance is not that critical here anymore)
+	for _, recv := range nt.recvs {
+		for {
+			nBytesRead := recv.readRingBuff(true, nt.pcieDMARead[0])
+
+			// no data has been read -> we are done
+			if nBytesRead == 0 {
+				break
+			}
+		}
+	}
 
 	// if enabled, check the hardware's error registers. the error registers
 	// are set if the RX ring buffer became full and the arriving traffic thus
@@ -398,13 +480,35 @@ func (nt *NetworkTester) PrintDataratesStop() {
 	nt.syncPrintDatarate.Wait()
 }
 
-// capture continuously reads the receiver ring buffers. It must be started in
-// a goroutine.
-func (nt *NetworkTester) capture() {
-	defer nt.syncCapture.Done()
+// replay continuously fills the generator ring buffers. It must be started in
+// a goroutine. Expects the generators, whose ring buffers shall be filled, as
+// well as the PCI Express DMA device as an argument.
+func (nt *NetworkTester) replay(gens Generators, pcieDMA *gopcie.PCIeDMA) {
+	defer nt.syncReplay.Done()
 
-	// trigger hardware to start capturing
-	nt.recvs.start()
+	var stop bool
+	for {
+		select {
+		case _ = <-nt.stopReplay:
+			// goroutine stop requested
+			stop = true
+		default:
+		}
+
+		if stop {
+			break
+		}
+
+		// write ring buffers
+		gens.writeRingBuffs(pcieDMA)
+	}
+}
+
+// capture continuously reads the receiver ring buffers. It must be started in
+// a goroutine. Expects the receivers, whose ring buffers shall be read, as
+// well as the PCI Express DMA device as an argument.
+func (nt *NetworkTester) capture(recvs Receivers, pcieDMA *gopcie.PCIeDMA) {
+	defer nt.syncCapture.Done()
 
 	var stop bool
 	for {
@@ -420,22 +524,7 @@ func (nt *NetworkTester) capture() {
 		}
 
 		// read ring buffers
-		nt.recvs.readRingBuffs()
-	}
-
-	// stop of the goroutine was requested -> stop capturing
-	nt.recvs.stop()
-
-	// drain remaining RX ring buffer contents
-	for _, recv := range nt.recvs {
-		for {
-			nBytesRead := recv.readRingBuff(true)
-
-			// no data has been read -> we are done
-			if nBytesRead == 0 {
-				break
-			}
-		}
+		recvs.readRingBuffs(pcieDMA)
 	}
 }
 

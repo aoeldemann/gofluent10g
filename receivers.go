@@ -32,6 +32,8 @@
 
 package gofluent10g
 
+import "github.com/aoeldemann/gopcie"
+
 // Receivers is a slice type holding pointers on Receiver instacnes. It
 // implements functions that allow easy control of multiple Receiver instances
 // at once.
@@ -67,10 +69,12 @@ func (recvs *Receivers) stop() {
 	}
 }
 
-// readRingBuff reads data from the ring buffer.
-func (recvs *Receivers) readRingBuffs() {
+// readRingBuff reads data from the ring buffer. The PCI Express DMA device
+// through which the read shall be performed needs to be provided as an
+// argument.
+func (recvs *Receivers) readRingBuffs(pcieDMA *gopcie.PCIeDMA) {
 	for _, recv := range *recvs {
-		recv.readRingBuff(false)
+		recv.readRingBuff(false, pcieDMA)
 	}
 }
 

@@ -69,14 +69,12 @@ func (gens *Generators) start() {
 }
 
 // writeRingBuffs writes trace data to the TX ring buffer of the generators in
-// the DRAM memory of the FPGA board. It returns the total number of bytes that
-// have been for all configured generators.
-func (gens *Generators) writeRingBuffs() uint64 {
-	var nTransferedBytes uint64
+// the DRAM memory of the FPGA board. The PCI Express DMA device through which
+// the write shall be performed needs to be provided as an argument.
+func (gens *Generators) writeRingBuffs(pcieDMA *gopcie.PCIeDMA) {
 	for _, gen := range *gens {
-		nTransferedBytes += uint64(gen.writeRingBuff())
+		gen.writeRingBuff(pcieDMA)
 	}
-	return nTransferedBytes
 }
 
 // startRateCtrl activates the rate control modules on all configured

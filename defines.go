@@ -65,9 +65,9 @@ const (
 )
 
 // PCIExpress device names
-const (
-	PCIE_XDMA_DEV_H2C = "/dev/xdma0_h2c_0"
-	PCIE_XDMA_DEV_C2H = "/dev/xdma0_c2h_0"
+var (
+	PCIE_XDMA_DEV_H2C = []string{"/dev/xdma0_h2c_0"}
+	PCIE_XDMA_DEV_C2H = []string{"/dev/xdma0_c2h_0"}
 )
 
 // DRAM memory addresses and ranges

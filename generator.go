@@ -49,6 +49,8 @@ package gofluent10g
 import (
 	"fmt"
 	"time"
+
+	"github.com/aoeldemann/gopcie"
 )
 
 // Generator is the struct providing methods for configurating the trace replay
@@ -150,12 +152,12 @@ func (gen *Generator) configHardware() {
 }
 
 // writeRingBuff writes trace data to the generator's TX ring buffer in the DRAM
-// memory of the FPGA board. It returns the number of bytes that have been
-// transferred.
-func (gen *Generator) writeRingBuff() uint32 {
+// memory of the FPGA board. The PCI Express DMA device must pe provided as an
+// argument.
+func (gen *Generator) writeRingBuff(pcieDMA *gopcie.PCIeDMA) {
 	if gen.trace == nil {
 		// nothing to do here
-		return 0
+		return
 	}
 
 	// get the trace size
@@ -171,7 +173,7 @@ func (gen *Generator) writeRingBuff() uint32 {
 
 	if traceSizeOutStanding == 0 {
 		// trace has been completely written, we are done here
-		return 0
+		return
 	}
 
 	// get ring buffer size
@@ -234,7 +236,7 @@ func (gen *Generator) writeRingBuff() uint32 {
 
 	if doTransfer == false {
 		// currently we cannot transfer data
-		return 0
+		return
 	}
 
 	// read data from trace file
@@ -251,7 +253,7 @@ func (gen *Generator) writeRingBuff() uint32 {
 	transferStartTime := time.Now()
 
 	// write data to the ring buffer
-	err := gen.nt.pcieDMAWrite.Write(gen.ringBuffAddr+uint64(ringBuffWrPtr),
+	err := pcieDMA.Write(gen.ringBuffAddr+uint64(ringBuffWrPtr),
 		data)
 	if err != nil {
 		Log(LOG_ERR, err.Error())
@@ -285,9 +287,6 @@ func (gen *Generator) writeRingBuff() uint32 {
 	// print out performance metrics
 	Log(LOG_DEBUG, "Generator %d: %d bytes in %s (%f Gbps)",
 		gen.id, transferSize, transferDuration, transferThroughput)
-
-	// return the amount of data that has been transferred
-	return transferSize
 }
 
 // start triggers the hardware to start reading data from the TX ring buffer

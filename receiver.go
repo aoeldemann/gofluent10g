@@ -40,6 +40,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/aoeldemann/gopcie"
 )
 
 // Receiver is the struct providing methods for configuring the traffic capture
@@ -276,8 +278,8 @@ func (recv *Receiver) configHardware() {
 // until the end of the ring buffer are smaller than
 // RING_BUFF_RD_TRANSFER_SIZE_MIN. If the parameter readAll is set to true, the
 // minimum transfer size is ignored and the function reads as many bytes as it
-// can get.
-func (recv *Receiver) readRingBuff(readAll bool) uint32 {
+// can get. Also, the PCI Express DMA device must pe provided as an argument.
+func (recv *Receiver) readRingBuff(readAll bool, pcieDMA *gopcie.PCIeDMA) uint32 {
 	if recv.captureEnable == false {
 		// nothing to do here
 		return 0
@@ -350,7 +352,10 @@ func (recv *Receiver) readRingBuff(readAll bool) uint32 {
 	transferStartTime := time.Now()
 
 	// read data from the ring buffer
-	recv.nt.pcieDMARead.Read(recv.ringBuffAddr+uint64(ringBuffRdPtr), data)
+	err := pcieDMA.Read(recv.ringBuffAddr+uint64(ringBuffRdPtr), data)
+	if err != nil {
+		Log(LOG_ERR, err.Error())
+	}
 
 	// evaluate dma transfer time
 	transferDuration := time.Since(transferStartTime)
