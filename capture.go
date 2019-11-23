@@ -41,7 +41,8 @@ type Capture struct {
 	wrPtr uint64 // current host memory write pointer position
 	// duration (in seconds) between two latency timestamp counter increments
 	tickPeriodLatency float64
-	caplen            int // maximum per-packet capture length
+	caplen            int  // maximum per-packet capture length
+	discard           bool // if true, captured data is discarded
 }
 
 // WriteToFile writes the captured data to an output file.
@@ -125,9 +126,7 @@ func (capture *Capture) GetPackets() CapturePackets {
 	return pkts
 }
 
-// GetSize returns the size of trace capture data in bytes. Even if data
-// is discarded after fetching it from the hardware, the size represents
-// the amount of data that has been fetched.
+// GetSize returns the size of trace capture data in bytes.
 func (capture *Capture) GetSize() uint64 {
 	// size of captured data is equal to current write pointer position
 	return capture.wrPtr
@@ -136,6 +135,12 @@ func (capture *Capture) GetSize() uint64 {
 // getWriteSlice returns an empty byte slice of size 'size' to which capture
 // data can be written to.
 func (capture *Capture) getWriteSlice(size uint32) []byte {
+	if capture.discard {
+		// captured data shall be discarded. always write data to the same
+		// (sub-) byte slice
+		return capture.data[0:size]
+	}
+
 	// get slice
 	wrSlice := capture.data[capture.wrPtr : capture.wrPtr+uint64(size)]
 

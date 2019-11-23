@@ -53,6 +53,7 @@ type Receiver struct {
 
 	captureEnable bool // determines whether capturing is enabled
 	captureLength int  // per-packet packet data capture length
+	hostMemSize   int  // amount of memory to reserve for capturing
 
 	capture *Capture // capture instance
 
@@ -80,29 +81,25 @@ func (recv *Receiver) EnableCapture(caplen int, hostMemSize int) {
 			"0 and 1518 bytes", recv.id)
 	}
 
-	// make sure hostMemSize is at least one DMA transfer block size
-	if hostMemSize < RING_BUFF_RD_TRANSFER_SIZE_MIN {
-		Log(LOG_ERR, "Receiver %d: host memory capture size must be at "+
-			"least %d bytes", RING_BUFF_RD_TRANSFER_SIZE_MIN)
-	}
-
+	// save capture parameters
 	recv.captureEnable = true
 	recv.captureLength = caplen
+
+	// make sure hostMemSize is at least one DMA transfer block size. zero is
+	// fine as well, because in that case captured data is simply discarded
+	// after it has been fetched from the software
+	if hostMemSize != 0 && hostMemSize < RING_BUFF_RD_TRANSFER_SIZE_MIN {
+		Log(LOG_ERR, "Receiver %d: host memory capture size must be at "+
+			"least %d bytes", recv.id, RING_BUFF_RD_TRANSFER_SIZE_MIN)
+	}
 
 	// host memory size must be a multiple of 64 bytes
 	if hostMemSize%64 != 0 {
 		hostMemSize = 64 * (hostMemSize/64 + 1)
 	}
 
-	// reserve memory for capture data
-	captureData := make([]byte, hostMemSize)
-
-	// create capture instance
-	recv.capture = &Capture{
-		data:              captureData,
-		tickPeriodLatency: recv.nt.timestamp.getTickPeriod(),
-		caplen:            caplen,
-	}
+	// save host memory size
+	recv.hostMemSize = hostMemSize
 }
 
 // DisableCapture disabled packet capturing.
@@ -392,6 +389,25 @@ func (recv *Receiver) start() {
 	if recv.captureEnable == false {
 		// nothing to do here
 		return
+	}
+
+	var captureData []byte
+	if recv.hostMemSize > 0 {
+		// reserve host memory to hold capture data
+		captureData = make([]byte, recv.hostMemSize)
+	} else {
+		// discarding capture data right away. only reserve a small memory
+		// block, which can contain an entire dma transfer. this data will
+		// be overwritten in each transfer
+		captureData = make([]byte, RING_BUFF_RD_TRANSFER_SIZE_MIN)
+	}
+
+	// create capture instance
+	recv.capture = &Capture{
+		data:              captureData,
+		tickPeriodLatency: recv.nt.timestamp.getTickPeriod(),
+		caplen:            recv.captureLength,
+		discard:           recv.hostMemSize == 0,
 	}
 
 	// start capturing
