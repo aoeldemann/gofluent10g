@@ -93,6 +93,6 @@ func (latencies Latencies) WriteToFile(filename string) {
 
 	// write latency values to file
 	for _, latency := range latencies {
-		fmt.Fprintf(f, "%.9f\n", latency)
+		fmt.Fprintf(f, "%.10f\n", latency)
 	}
 }
