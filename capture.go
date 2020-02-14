@@ -98,6 +98,9 @@ func (capture *Capture) GetPackets() CapturePackets {
 			caplen = wirelen
 		}
 
+		// increment wire length by 4 byte, because MAC strips off the FCS
+		wirelen += 4
+
 		// create new CapturePacket struct
 		pkt := CapturePacket{
 			ArrivalTime: arrivalTime,
